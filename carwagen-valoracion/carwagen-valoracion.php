@@ -81,6 +81,9 @@ function carwagenValoracionShortcode($params = array(), $content = null) {
 
   if (isset($_POST['client-appraise']) && $_POST['client-appraise'] != '') {
 
+    /*[datecode] => 011900590310001ES001 [AbBZ] => 5050 [registrationdate] => 2017-05-15 */
+    //$params = array( "datecode" => '', 'kilometer' => '', 'registrationDate' => '', 'container' => '', 'constructionTime' => '')
+
     $email_admin = get_option("_carwagen_valoracion_admin_email");
     $email_user = strip_tags($_REQUEST['client-email']);
     $phone_user = strip_tags($_REQUEST['client-phone']);
@@ -91,38 +94,48 @@ function carwagenValoracionShortcode($params = array(), $content = null) {
     $params['datecode'] = substr(strip_tags($_REQUEST['datecode']), 0, 15); 
     $params['container'] = substr(strip_tags($_REQUEST['datecode']), 15, 5); 
     $params['constructionTime'] = strip_tags($_REQUEST['AbBZ']); 
-    $params['kilometer'] = strip_tags($_REQUEST['kilometer']); 
+    $params['kilometer'] = strip_tags($_REQUEST['kilometer']);
+    $params['vehicle_string'] = strip_tags($_REQUEST['vehicle_string']);  
+    $params['model_string'] = strip_tags($_REQUEST['model_string']);  
 
     //Obtenemos la valoración
     $api_request = apiCallGetEvaluationDataIberica ($params);
-    $vehiculo = implode(" ", $api_request['vehiculo']);
+    $vehiculo_extra = $api_request['vehiculo']['ns1ManufacturerName']." ".$api_request['vehiculo']['ns1BaseModelName'];
+    $vehiculo = $params['vehicle_string'];
+    $modelo = $params['model_string'];
     $step = $api_request['valoracion'] * 0.10; //+- 5% del precio original
     $max_valoracion = number_format((ceil(($api_request['valoracion'] + $step) / 100) * 100), 0, ",", ".")."€";
     $min_valoracion = number_format((floor(($api_request['valoracion'] - $step) / 100) * 100), 0, ",", ".")."€";
     $valoracion = number_format($api_request['valoracion'], 0, ",", ".")."€";
-    $valoracion_text = sprintf(__("Desde %s hasta %s", 'carwagen-valoracion'), $min_valoracion, $max_valoracion). " (OCULTAR => ".number_format($api_request['valoracion'], 0, ",", ".")."€)";
+    $valoracion_text = sprintf(__("Desde %s hasta %s", 'carwagen-valoracion'), $min_valoracion, $max_valoracion);
 
     //Sacamos el mensaje de gracias
-    echo str_replace("*|valoracion|*", $valoracion_text, get_option("_carwagen_valoracion_thanks"));    
+    $html = str_replace("*|valoracion|*", $valoracion_text, stripslashes(get_option("_carwagen_valoracion_thanks"))); 
+    $html = str_replace("*|vehiculo|*", $vehiculo, $html);
+    $html = str_replace("*|modelo|*", $modelo, $html);
+    echo $html;   
     
     //Madamos el email al usuario
     if(is_email($email_user)) {
-      $template = get_option("_carwagen_user_email_html");
+      $template = stripslashes(get_option("_carwagen_user_email_html"));
       $template = str_replace("*|valoracion|*", $valoracion_text, $template);
       $template = str_replace("*|nombre|*", $name_user, $template);
+      $template = str_replace("*|vehiculo|*", $vehiculo, $template);
+      $template = str_replace("*|modelo|*", $modelo, $template);
+      $template = str_replace("*|kilometraje|*", number_format($params['kilometer'], 0, ",", "."), $template);
       $headers = array('Content-Type: text/html; charset=UTF-8');
       wp_mail($email_user, get_option("_carwagen_user_email_title"), $template, $headers);
     }
 
     //Mandamos email al admin
-    $template = sprintf(__("<b>Nombre:</b> %s<br/><b>Email:</b> %s<br/><b>Teléfono:</b> %s<br/><b>Valoración:</b> %s<br/><b>Kilometraje:</b> %s<br/><b>Código de coche:</b> %s<br/><b>Coche:</b> %s<br/><br/>---<br/><br/>", 'carwagen-valoracion'), $name_user, $email_admin, $phone_user, $valoracion." (".$valoracion_text.")", $params['kilometer'],  $params['datecode'], $vehiculo);
+    $template = sprintf(__("<b>Nombre:</b> %s<br/><b>Email:</b> %s<br/><b>Teléfono:</b> %s<br/><b>Valoración:</b> %s<br/><b>Valoración dada al cliente:</b> %s<br/><b>Kilometraje:</b> %s kms.<br/><b>Código de coche:</b> %s<br/><b>Coche:</b> %s<br/><b>Matriculación:</b> %s<br/><br/>---<br/><br/>", 'carwagen-valoracion'), $name_user, $email_user, $phone_user, $valoracion, $valoracion_text, number_format($params['kilometer'], 0, ",", "."),  $params['datecode'], $vehiculo." (".$vehiculo_extra.") ". $modelo, $params['registrationDate']);
     $template .= sprintf(__("Puedes descargar todo los leads <a href='%s'>aquí</a>.", 'carwagen-valoracion'), plugin_dir_url(__FILE__)."csv/leads.csv");
     $headers = array('Content-Type: text/html; charset=UTF-8');
     wp_mail($email_admin, __("Nueva valoración de vehículo", 'carwagen-valoracion'), $template, $headers);
 
     //Guardamos log
     $f = fopen(dirname(__FILE__)."/csv/leads.csv", "a+");
-    $line = date("Y-m-d H:i:s").',"'.$name_user.'","'.$email_user.'","'.$phone_user.'","'.$params['registrationDate'].'","'.$valoracion.'","'. $params['kilometer'].'","'. $params['datecode'].'","'. $vehiculo.'"'."\n";
+    $line = date("Y-m-d H:i:s").',"'.$name_user.'","'.$email_user.'","'.$phone_user.'","'.$params['registrationDate'].'","'.$valoracion.'","'. $params['kilometer'].'","'. $params['datecode'].'","'. $vehiculo.' '.$modelo.'"'."\n";
     fwrite ($f, $line);
     fclose($f);
 
@@ -133,6 +146,7 @@ function carwagenValoracionShortcode($params = array(), $content = null) {
   $response = apiCallGetSelectionDataIberica (); ?>
   <div id="selector-div">
     <div class="shadow"></div>
+    <p class="error"><?php _e("Lo sentimos, no hemos encontrado el vehículo que estás buscando.", 'carwagen-valoracion'); ?></p>
     <div class="vc_separator wpb_content_element vc_separator_align_left vc_sep_width_100 vc_sep_double vc_sep_border_width_2 vc_sep_pos_align_center vc_sep_color_grey titulares-home vc_separator-has-text"><span class="vc_sep_holder vc_sep_holder_l"><span class="vc_sep_line"></span></span><h4><?php _e("Selecciona un tipo de vehículo", 'carwagen-valoracion'); ?></h4><span class="vc_sep_holder vc_sep_holder_r"><span class="vc_sep_line"></span></span></div>
     <select name="vehicleType">
       <option value=""><?php _e("Elige una opción", 'carwagen-valoracion'); ?></option>
@@ -182,7 +196,7 @@ function carwagenValoracionShortcode($params = array(), $content = null) {
     </select>
     
 
-    <div class="subModel hiddentitle vc_separator wpb_content_element vc_separator_align_left vc_sep_width_100 vc_sep_double vc_sep_border_width_2 vc_sep_pos_align_center vc_sep_color_grey titulares-home vc_separator-has-text"><span class="vc_sep_holder vc_sep_holder_l"><span class="vc_sep_line"></span></span><h4><i class="demo-icon icon-color"></i> <?php _e("Selecciona un submodelo", 'carwagen-valoracion'); ?></h4><span class="vc_sep_holder vc_sep_holder_r"><span class="vc_sep_line"></span></span></div>
+    <div class="subModel hiddentitle vc_separator wpb_content_element vc_separator_align_left vc_sep_width_100 vc_sep_double vc_sep_border_width_2 vc_sep_pos_align_center vc_sep_color_grey titulares-home vc_separator-has-text"><span class="vc_sep_holder vc_sep_holder_l"><span class="vc_sep_line"></span></span><h4><i class="demo-icon icon-color"></i> <?php _e("Selecciona una versión", 'carwagen-valoracion'); ?></h4><span class="vc_sep_holder vc_sep_holder_r"><span class="vc_sep_line"></span></span></div>
     <select name="subModel" class="hiddenselect">
     </select>
     
@@ -191,17 +205,19 @@ function carwagenValoracionShortcode($params = array(), $content = null) {
     <select name="year" class="hiddenselect">
     </select>
     
-    <div class="line hiddentitle vc_separator wpb_content_element vc_separator_align_left vc_sep_width_100 vc_sep_double vc_sep_border_width_2 vc_sep_pos_align_center vc_sep_color_grey titulares-home vc_separator-has-text"><span class="vc_sep_holder vc_sep_holder_l"><span class="vc_sep_line"></span></span><h4><?php _e("Selecciona una LINE", 'carwagen-valoracion'); ?></h4><span class="vc_sep_holder vc_sep_holder_r"><span class="vc_sep_line"></span></span></div>
+    <div class="line hiddentitle vc_separator wpb_content_element vc_separator_align_left vc_sep_width_100 vc_sep_double vc_sep_border_width_2 vc_sep_pos_align_center vc_sep_color_grey titulares-home vc_separator-has-text"><span class="vc_sep_holder vc_sep_holder_l"><span class="vc_sep_line"></span></span><h4><?php _e("Selecciona una linea", 'carwagen-valoracion'); ?></h4><span class="vc_sep_holder vc_sep_holder_r"><span class="vc_sep_line"></span></span></div>
     <select name="line" class="hidden">
     </select>
     
 
-    <div class="container hiddentitle vc_separator wpb_content_element vc_separator_align_left vc_sep_width_100 vc_sep_double vc_sep_border_width_2 vc_sep_pos_align_center vc_sep_color_grey titulares-home vc_separator-has-text"><span class="vc_sep_holder vc_sep_holder_l"><span class="vc_sep_line"></span></span><h4><?php _e("Selecciona una CONTAINER", 'carwagen-valoracion'); ?></h4><span class="vc_sep_holder vc_sep_holder_r"><span class="vc_sep_line"></span></span></div>
+    <div class="container hiddentitle vc_separator wpb_content_element vc_separator_align_left vc_sep_width_100 vc_sep_double vc_sep_border_width_2 vc_sep_pos_align_center vc_sep_color_grey titulares-home vc_separator-has-text"><span class="vc_sep_holder vc_sep_holder_l"><span class="vc_sep_line"></span></span><h4><?php _e("Selecciona una variante", 'carwagen-valoracion'); ?></h4><span class="vc_sep_holder vc_sep_holder_r"><span class="vc_sep_line"></span></span></div>
     <select name="container" class="hiddenselect">
     </select>
   </div>
   <div id="form-div">
     <form method="POST" action="<?php echo get_the_permalink(); ?>">
+      <input type="hidden" name="vehicle_string" value="" />
+      <input type="hidden" name="model_string" value="" />
       <input type="hidden" name="datecode" value="" />
       <input type="hidden" name="AbBZ" value="" />
       <input type="hidden" name="BisBZ" value="" />
@@ -240,14 +256,26 @@ function carwagenValoracionShortcode($params = array(), $content = null) {
       display: none;
     }
     #selector-div, #form-div {
-      padding: 30px 30px 30px 30px;
+    padding: 30px 60px 30px 60px;
       position: relative;
-      background-color: #cecece;
+    background-color: #ffffff! important;
+    border-radius: 20px;
+    box-shadow: 3px 5px 12px #cecece;
     }
     
+    #selector-div .vc_separator.vc_separator_align_left h4,
+     #form-div .vc_separator.vc_separator_align_left h4 {
+	    padding: 0 .8em 0 0;
+	    font-size: 20px;
+	}
+    
+   
     #form-div {
-       padding: 1px 30px 30px 30px;
-       margin-top: -33px
+       padding: 1px 60px 30px 60px;
+           box-shadow: 3px 7px 12px #cecece;
+       margin-top: -33px;
+       border-top-left-radius: 0px;
+       border-top-right-radius: 0px;
     }
     #selector-div.loading .shadow {
       background: #21212733 url('<?php echo plugin_dir_url(__FILE__); ?>assets/img/ajax-loader.gif') center center no-repeat;
@@ -258,6 +286,19 @@ function carwagenValoracionShortcode($params = array(), $content = null) {
       position: absolute;
       top: 0px;
       width: 100%;
+          border-radius: 20px;
+    }
+    
+    .error {
+    	display: none;
+    	color: #fff;
+    	text-align: center;
+    	background-color: #ed1c24;
+    	padding: 10px;
+    }
+    
+    .error.show {
+    	display: block;
     }
     
     #selector-div .vc_separator,
@@ -307,7 +348,7 @@ function carwagenValoracionShortcode($params = array(), $content = null) {
         if(control == 1) {
           jQuery(this).empty();
           jQuery(this).addClass("hiddenselect");
-          jQuery("h5."+current_select).addClass("hiddentitle");
+          jQuery("."+current_select).addClass("hiddentitle");
         }
         params.push(current_select + ":" + this.value);
         if(current_select == select) control = 1;
@@ -332,7 +373,29 @@ function carwagenValoracionShortcode($params = array(), $content = null) {
         },
         success: function(data){
           console.log(data);
-          if (data['vehicle']) {
+         if(jQuery.isEmptyObject(data)) { 
+          	jQuery(".error").addClass("show");
+          } else if (data['vehicle']) {
+            jQuery(".error").removeClass("show");
+            
+            var vehicle_string = new Array();
+            if(jQuery("#selector-div select[name=manufacturer]").find('option:selected').text() != '') vehicle_string.push(jQuery("#selector-div select[name=manufacturer]").find('option:selected').text());
+            if(jQuery("#selector-div select[name=baseModel]").find('option:selected').text() != '') vehicle_string.push(jQuery("#selector-div select[name=baseModel]").find('option:selected').text());
+            if(jQuery("#selector-div select[name=subModel]").find('option:selected').text() != '') vehicle_string.push(jQuery("#selector-div select[name=subModel]").find('option:selected').text());
+            console.log(vehicle_string);
+            jQuery("#form-div input[name=vehicle_string]").val(vehicle_string.join(" "));  
+            
+            var model_string = new Array();
+            if(jQuery("#selector-div select[name=fuel]").find('option:selected').text() != '') model_string.push(jQuery("#selector-div select[name=fuel]").find('option:selected').text());
+            if(jQuery("#selector-div select[name=gear]").find('option:selected').text() != '') model_string.push(jQuery("#selector-div select[name=gear]").find('option:selected').text());
+            if(jQuery("#selector-div select[name=power]").find('option:selected').text() != '') model_string.push(jQuery("#selector-div select[name=power]").find('option:selected').text()+" CV");
+            if(jQuery("#selector-div select[name=cylinder]").find('option:selected').text() != '') model_string.push(jQuery("#selector-div select[name=cylinder]").find('option:selected').text()+" cc.");
+            if(jQuery("#selector-div select[name=doors]").find('option:selected').text() != '') model_string.push(jQuery("#selector-div select[name=doors]").find('option:selected').text());
+            console.log(model_string);
+            jQuery("#form-div input[name=model_string]").val(model_string.join(" / "));
+            
+            
+            
             jQuery("#form-div input[name=datecode]").val(data['vehicle']['datecode']);
             jQuery("#form-div input[name=AbBZ]").val(data['vehicle']['AbBZ']);
             jQuery("#form-div input[name=BisBZ]").val(data['vehicle']['BisBZ']);
@@ -493,12 +556,19 @@ function apiCallGetEvaluationDataIberica ($params = array( "datecode" => '', 'ki
   curl_setopt($curl, CURLOPT_POST, true);
   curl_setopt($curl, CURLOPT_POSTFIELDS, $xml_send_get_evaluation);
   $response = curl_exec($curl); 
+  //echo "<pre>"; print_r(simplexml_load_string(str_replace(':', '', $response))); echo "</pre>";
   $responseArray = json_decode(json_encode(simplexml_load_string(str_replace(':', '', $response))),true);
 
   $valoracion = 0;
   array_walk_recursive($responseArray, 'searchValue');
   array_walk_recursive($responseArray, 'searchVehicle');
 
+  //echo "<textarea cols=100 rows=10>"; print_r($valoracion); print_r($vehiculo);  echo ",,,,,</textarea><br/>"; 
+  //echo "<textarea cols=100 rows=10>"; print_r($responseArray); echo "</textarea><br/>"; 
+  //$valoracion = $responseArray['SBody']['ns4getVehicleEvaluationResponse']['VXS']['ns1Dossier']['ns1Valuation'];
+  //$vehicle = $responseArray['SBody']['ns4getVehicleEvaluationResponse']['VXS']['ns1Dossier']['ns1Vehicle'];
+  //echo "<textarea cols=100 rows=10>"; print_r(); echo "</textarea><br/>"; 
+  //echo "<textarea cols=100 rows=10>"; print_r($responseArray['SBody']['ns4getVehicleEvaluationResponse']['VXS']['ns1Dossier']['ns1Valuation']); echo "</textarea>"; 
   curl_close($curl); 
   return array(
     "valoracion" => $valoracion,
